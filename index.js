@@ -407,6 +407,8 @@ fs.readJson(opts.config).then(function (config) {
                                     Promise.mapSeries(card.attachments, attachment => {
                                         return fetchImage(attachment.url).then(image => {
                                             return uploadImageToAsana(taskData.id, image, path.basename(attachment.url));
+                                        }).catch(reason => {
+                                            console.log('Failed to upload attachment', reason);
                                         });
                                     })
                                 );
