@@ -40,6 +40,11 @@ var opts = require('nomnom')
                 abbr: 'm',
                 full: 'only-members',
                 flag: true
+            },
+            append: {
+                help: 'Append tasks when exists the same project',
+                abbr: 'a',
+                flag: true
             }
         })
         .parse();
@@ -80,10 +85,10 @@ var getUniqueName = function getUniqueName(name, haystack) {
     }
 };
 
-var convertMap = function convertToMap(data, map) {
+var convertMap = function convertMap(data, map) {
     if (_.isArray(data)) {
         return _.compact(_.map(data, id => {
-            return convertToMap(id, map);
+            return convertMap(id, map);
         }));
     }
 
@@ -120,7 +125,9 @@ fs.readJson(opts.config).then(function (config) {
     var asanaData = {
         projects: [],
         tags: [],
-        users: []
+        users: [],
+        tasks: [],
+        sections: []
     };
 
     var uploadImageToAsana = function (taskId, file, filename) {
@@ -224,6 +231,7 @@ fs.readJson(opts.config).then(function (config) {
             let labelToTagMap = {};
             let checklistMap = {};
             let userMap = {};
+            let promise;
 
             _.each(file.checklists, checklist => {
                 checklistMap[checklist.id] = checklist;
@@ -233,18 +241,49 @@ fs.readJson(opts.config).then(function (config) {
                 userMap[user.id] = user.name;
             });
 
-            // Creates a Project
-            return client.projects.createInTeam(config.asana.team, {
-                name: getUniqueName(file.name, _.pluck(asanaData.projects, 'name')),
-                notes: file.desc,
-                layout: 'board'
-            }).then(result => {
-                console.log(`Created ${result.name} project in your team.`);
-                projectData = result;
-                asanaData.projects.push(result);
+            // Append tasks
+            if (opts.append && _.contains(_.pluck(asanaData.projects, 'name'), file.name)) {
+                projectData = _.find(asanaData.projects, project => {
+                    return project.name === file.name;
+                });
+
+                promise = client.tasks.findByProject(projectData.id).then(fetch).then(tasks => {
+                    console.log(`Loaded exists ${tasks.length} tasks.`);
+                    asanaData.tasks = tasks;
+
+                    return client.sections.findByProject(projectData.id);
+                }).then(sections => {
+                    console.log(`Loaded exists ${sections.length} sections.`);
+                    asanaData.sections = sections;
+                });
+            } else {
+                promise = client.projects.createInTeam(config.asana.team, {
+                    name: getUniqueName(file.name, _.pluck(asanaData.projects, 'name')),
+                    notes: file.desc,
+                    layout: 'board'
+                }).then(result => {
+                    console.log(`Created ${result.name} project in your team.`);
+                    projectData = result;
+                    asanaData.projects.push(result);
+                });
+            }
+
+            return promise.then(function () {
+                var filteredList = _.filter(file.lists, list => {
+                    var matchedSection = _.find(asanaData.sections, section => {
+                        return section.name === list.name;
+                    });
+
+                    if (matchedSection) {
+                        listToSectionMap[list.id] = matchedSection.id;
+                        return false;
+                    } else {
+                        return true;
+                    }
+                });
 
                 // Creates sections in order
-                return Promise.mapSeries(file.lists, list => {
+                return Promise.mapSeries(filteredList, list => {
                     return client.sections.createInProject(projectData.id, {
                         name: list.name
                     }).then(result => {
@@ -252,7 +291,7 @@ fs.readJson(opts.config).then(function (config) {
                         console.log(`Created ${list.name} section.`);
                     });
                 });
-            }).then(() => {
+            }).then(function () {
                 // Filter exists tags same with label
                 var labels = _.filter(file.labels, label => {
                     var matchedTag = _.find(asanaData.tags, tag => {
@@ -283,11 +322,24 @@ fs.readJson(opts.config).then(function (config) {
                 }, {
                     concurrency: 3
                 }).then(function () {
-                    console.log(`Creating ${file.cards.length} tasks...`);
                     let countTask = 0;
+                    var filteredCards = _.filter(file.cards, card => {
+                        var matchedTask = _.find(asanaData.tasks, task => {
+                            return task.name === card.name;
+                        });
+
+                        if (matchedTask) {
+                            cardToTaskMap[card.id] = matchedTask.id
+                            return false;
+                        } else {
+                            return true;
+                        }
+                    });
+
+                    console.log(`Creating ${filteredCards.length} of ${file.cards.length} tasks...`);
 
                     // Creates tasks
-                    return Promise.mapSeries(file.cards, card => {
+                    return Promise.mapSeries(filteredCards, card => {
                         return client.tasks.create({
                             assignee: card.idMembers.length ? convertMap(_.first(card.idMembers), config.member) : null,
                             due_at: card.due,
