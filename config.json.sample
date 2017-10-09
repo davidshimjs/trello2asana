@@ -1,0 +1,14 @@
+{
+    "trello": {
+        "key": "<TRELLO_API_KEY>",
+        "token": "<TRELLO_API_TOKEN>"
+    },
+    "asana": {
+        "personal_access_token": "<ASANA_API_TOKEN>",
+        "workspace": "<ASANA_WORKSPACE_ID>",
+        "team": "<ASANA_TEAM_ID>"
+    },
+    "member": {
+        "<TRELLO_MEMBER_ID>": "<ASANA_MEMBER_ID>"
+    }
+}
