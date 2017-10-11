@@ -55,12 +55,20 @@ var parseJson = function (path) {
             'name', 'desc', 'labels', 'cards', 'lists', 'members', 'checklists'
         ]);
 
-        output.cards = _.filter(output.cards, function (card) {
-            return !card.closed;
-        });
+        var closedListIds = [];
 
         output.lists = _.filter(output.lists, function (list) {
-            return !list.closed;
+            if (list.closed) {
+                closedListIds.push(list.id);
+                return false;
+            } else {
+                return true;
+            }
+        });
+
+        // Cards in archived the List is not closed
+        output.cards = _.filter(output.cards, function (card) {
+            return !card.closed && _.indexOf(closedListIds, card.idList) === -1;
         });
 
         return output;
