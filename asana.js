@@ -119,44 +119,57 @@ fs.readJson(opts.config).then(config => {
         });
     }
 
+    const taskOptions = {
+        opt_fields: ['name', 'attachments', 'assignee', 'followers', 'created_at', 'completed', 'notes', 'parent', 'subtasks', 'tags'].join(',')
+    };
+
     // test 579942885784874
-    // return client.tasks.findByProject(opts.from, {
-    //     opt_fields: ['attachments', 'assignee', 'followers', 'created_at', 'completed', 'notes', 'parent', 'tags'].join(',')
-    // }).then(fetch).then(result => {
-    return client.tasks.findById(579942885784874, {
-        opt_fields: ['attachments', 'assignee', 'followers', 'created_at', 'completed', 'notes', 'parent', 'tags', 'stories'].join(',')
-    }).then(fetch).then(result => {
-        const map = _.indexBy(result, 'id');
-
-        // Grouping by parent
-        result = _.compact(_.map(result, item => {
-            if (item.parent === null) {
-                return item;
-            } else if (map[item.parent.id]) {
-                map[item.parent.id].children = map[item.parent.id].children || [];
-                map[item.parent.id].children.push(item);
-                return null;
-            }
-        }));
-
-        const createTask = function (data) {
-            return client.tasks.create({
+    // return client.tasks.findById(579942885784874, taskOptions).then(fetch).then(result => {
+    return client.tasks.findByProject(opts.from, taskOptions).then(fetch).then(result => {
+        const createTask = function createTask(data, parentTask) {
+            const insertData = {
                 assignee: !_.isEmpty(data.assignee) ? data.assignee.id : null,
                 followers: !_.isEmpty(data.followers) ? _.pluck(data.followers, 'id') : null,
                 name: data.name,
                 notes: data.notes,
-                memberships: [{
-                    project: opts.to
-                }],
-                tags: !_.isEmpty(data.tags) ? _.pluck(data.tags, 'id') : null
-            }).then(result => {
+                tags: !_.isEmpty(data.tags) ? _.pluck(data.tags, 'id') : []
+            };
+
+            let promise = Promise.resolve();
+
+            if (parentTask) {
+                insertData.workspace = opts.workspace;
+
+                promise = client.tasks.addSubtask(parentTask.id, insertData);
+            } else {
+                _.extend(insertData, {
+                    memberships: [{
+                        project: opts.to
+                    }],
+                    projects: [ opts.to ] // projects 혹은 workspace를 명시해줘야 한다
+                });
+
+                promise = client.tasks.create(insertData);
+            }
+
+            return promise.then(result => {
                 const task = result;
                 const promises = [];
 
+                if (!_.isEmpty(data.subtasks)) {
+                    promises.push(client.tasks.subtasks(data.id, taskOptions).then(fetch).then(result => {
+                        return Promise.mapSeries(result, data => {
+                            return createTask(data, task);
+                        });
+                    }));
+                }
+
                 if (!_.isEmpty(data.attachments)) {
-                    promises.push(client.attachments.findByTask(data.id).then(result => {
-                        return Promise.mapSeries(result, attachement => {
-                            return fetchImage(attachement.view_url).then(image => {
+                    promises.push(client.attachments.findByTask(data.id, {
+                        opt_fields: ['name', 'view_url'].join(',')
+                    }).then(fetch).then(result => {
+                        return Promise.mapSeries(result, attachment => {
+                            return fetchImage(attachment.view_url).then(image => {
                                 return uploadImageToAsana(task.id, image, attachment.name);
                             }).catch(reason => {
                                 console.log('Failed to upload attachment', reason);
@@ -166,7 +179,7 @@ fs.readJson(opts.config).then(config => {
                 }
 
                 if (!_.isEmpty(data.stories)) {
-                    promises.push(client.stories.findByTask(data.id).then(result => {
+                    promises.push(client.stories.findByTask(data.id).then(fetch).then(result => {
                         return Promise.mapSeries(result, story => {
                             return client.tasks.addComment(task.id, {
                                 text: `${story.created_by.name}: ${story.text}`
@@ -175,12 +188,18 @@ fs.readJson(opts.config).then(config => {
                     }));
                 }
 
-                return Promise.all(promises);
+                if (!_.isEmpty(promises)) {
+                    return Promise.all(promises);
+                } else {
+                    return;
+                }
             });
         };
 
         return Promise.mapSeries(result, item => {
-            console.log(item);
+            return createTask(item).then(() => {
+                console.log(`${item.id} task copied.`);
+            });
         });
     });
 
@@ -268,7 +287,7 @@ fs.readJson(opts.config).then(config => {
             // });
         // });
 }).catch(reason => {
-    console.error(reason);
+    console.error(util.inspect(reason, null, 4));
 }).catch(Promise.CancellationError, function (reason) {
     // nothing to do
 });
