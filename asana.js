@@ -22,6 +22,9 @@ const opts = require('nomnom')
             },
             section: {
                 help: 'Section name'
+            },
+            start: {
+                help: 'Start task id'
             }
         })
         .parse();
@@ -129,7 +132,7 @@ fs.readJson(opts.config).then(config => {
         const createTask = function createTask(data, parentTask) {
             const insertData = {
                 assignee: !_.isEmpty(data.assignee) ? data.assignee.id : null,
-                followers: !_.isEmpty(data.followers) ? _.pluck(data.followers, 'id') : null,
+                followers: !_.isEmpty(data.followers) ? _.pluck(data.followers, 'id') : [],
                 name: data.name,
                 notes: data.notes,
                 tags: !_.isEmpty(data.tags) ? _.pluck(data.tags, 'id') : []
@@ -196,96 +199,23 @@ fs.readJson(opts.config).then(config => {
             });
         };
 
+        if (opts.start) {
+            _.some(result, (v, i) => {
+                // type 비교를 안함
+                if (v.id == opts.start) {
+                    result = result.slice(i);
+                    console.log(`${v.id} 이후부터 시작합니다.`);
+                    return true;
+                }
+            });
+        }
+
         return Promise.mapSeries(result, item => {
             return createTask(item).then(() => {
                 console.log(`${item.id} task copied.`);
             });
         });
     });
-
-    // Prepare asana data to avoid duplicated
-        // Executes in order
-        // return Promise.mapSeries(files, function (file) {
-            // // Creates tasks
-            // return Promise.mapSeries(filteredCards, card => {
-            //     return client.tasks.create({
-            //         assignee: card.idMembers.length ? convertMap(_.first(card.idMembers), config.member) : null,
-            //         due_at: card.due,
-            //         followers: card.idMembers.length > 1 ? convertMap(card.idMembers, config.member) : [],
-            //         name: card.name,
-            //         notes: card.desc,
-            //         memberships: [{
-            //             project: projectData.id,
-            //             section: convertMap(card.idList, listToSectionMap)
-            //         }],
-            //         tags: card.idLabels.length ? convertMap(card.idLabels, labelToTagMap) : [],
-            //         projects: [ projectData.id ]
-            //     }).then(result => {
-            //         var promises = [];
-            //         var taskData = result;
-            //         cardToTaskMap[card.id] = result.id;
-            //         countTask++;
-
-            //         if (countTask % 10 === 0) {
-            //             console.log(`${countTask}...`);
-            //         }
-
-            //         if (card.idChecklists.length) {
-            //             promises.push(
-            //                 Promise.mapSeries(convertMap(card.idChecklists.reverse(), checklistMap), checklist => {
-            //                     return Promise.mapSeries(checklist.checkItems.reverse(), item => {
-            //                         return client.tasks.addSubtask(taskData.id, {
-            //                             name: item.name,
-            //                             completed: item.state !== 'incomplete'
-            //                         });
-            //                     }).then(function () {
-            //                         return client.tasks.addSubtask(taskData.id, {
-            //                             name: `${checklist.name}:`
-            //                         });
-            //                     });
-            //                 })
-            //             );
-            //         }
-
-            //         if (parseInt(card.badges.comments, 10) > 0) {
-            //             promises.push(
-            //                 // Trello export has limitation for count of actions as 1000. so we need to request directly trello API.
-            //                 trello.getAsync(`/1/cards/${card.id}/actions?limit=1000`).then(result => {
-            //                     var comments = _.filter(result, action => {
-            //                         return action.type === 'commentCard';
-            //                     });
-
-            //                     return Promise.mapSeries(comments.reverse(), comment => {
-            //                         var member = convertMap(comment.idMemberCreator, config.member);
-            //                         var text = comment.data.text;
-            //                         var memberName = member ? convertMap(member, userMap) : comment.memberCreator.fullName;
-
-            //                         text = `${memberName}: ${text} from Trello`;
-
-            //                         return client.tasks.addComment(taskData.id, {
-            //                             text: text
-            //                         });
-            //                     });
-            //                 })
-            //             );
-            //         }
-
-            //         if (card.attachments.length) {
-            //             promises.push(
-            //                 Promise.mapSeries(card.attachments, attachment => {
-            //                     return fetchImage(attachment.url).then(image => {
-            //                         return uploadImageToAsana(taskData.id, image, path.basename(attachment.url));
-            //                     }).catch(reason => {
-            //                         console.log('Failed to upload attachment', reason);
-            //                     });
-            //                 })
-            //             );
-            //         }
-
-            //         return Promise.all(promises);
-            //     });
-            // });
-        // });
 }).catch(reason => {
     console.error(util.inspect(reason, null, 4));
 }).catch(Promise.CancellationError, function (reason) {
